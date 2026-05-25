@@ -1,5 +1,7 @@
 package concurrency
 
+import "errors"
+
 // =============================================================================
 // EXERCISE 1.2: Pipelines with Directional Channels
 // =============================================================================
@@ -35,7 +37,16 @@ package concurrency
 // QUESTION: Why do we return <-chan int instead of chan int?
 func Generate(start, end int) <-chan int {
 	// YOUR CODE HERE
-	return nil
+	ch := make(chan int)
+
+	go func(start, end int, ch chan<- int) {
+		for i := start; i < end; i++ {
+			ch <- i
+		}
+		close(ch)
+	}(start, end, ch)
+
+	return ch
 }
 
 // Square receives integers, squares them, and sends results.
@@ -53,7 +64,17 @@ func Generate(start, end int) <-chan int {
 // QUESTION: What happens if you forget to close the output channel?
 func Square(in <-chan int) <-chan int {
 	// YOUR CODE HERE
-	return nil
+
+	out := make(chan int)
+
+	go func(in <-chan int, out chan<- int) {
+		for val := range in {
+			out <- val * val
+		}
+		close(out)
+	}(in, out)
+
+	return out
 }
 
 // Sum receives integers and returns their sum.
@@ -67,7 +88,12 @@ func Square(in <-chan int) <-chan int {
 // NOTE: This function blocks until the channel is closed!
 func Sum(in <-chan int) int {
 	// YOUR CODE HERE
-	return 0
+
+	var sum int = 0
+	for val := range in {
+		sum += val
+	}
+	return sum
 }
 
 // RunPipeline connects the stages: Generate -> Square -> Sum
@@ -76,7 +102,10 @@ func Sum(in <-chan int) int {
 // Example: RunPipeline(1, 4) should compute 1^2 + 2^2 + 3^2 = 1 + 4 + 9 = 14
 func RunPipeline(start, end int) int {
 	// YOUR CODE HERE
-	return 0
+	in := Generate(start, end)
+	squares := Square(in)
+	sum := Sum(squares)
+	return sum
 }
 
 // =============================================================================
@@ -140,7 +169,17 @@ type Result struct {
 // 3. Close the channel when done
 func GenerateWithError(start, end, errEvery int) <-chan Result {
 	// YOUR CODE HERE
-	return nil
+	ch := make(chan Result)
+
+	for i := start; i < end; i++ {
+		if i%errEvery == 0 {
+			ch <- Result{Err: errors.New("")}
+		} else {
+			ch <- Result{Value: i}
+		}
+	}
+	close(ch)
+	return ch
 }
 
 // ProcessResults demonstrates handling errors in a pipeline.
@@ -152,7 +191,14 @@ func GenerateWithError(start, end, errEvery int) <-chan Result {
 // 4. Return (sum, errorCount)
 func ProcessResults(in <-chan Result) (sum int, errorCount int) {
 	// YOUR CODE HERE
-	return 0, 0
+
+	for val := range in {
+		if val.Err != nil {
+			errorCount++
+		}
+		sum += val.Value
+	}
+	return sum, errorCount
 }
 
 // =============================================================================
@@ -173,6 +219,7 @@ func ProcessResults(in <-chan Result) (sum int, errorCount int) {
 // HINT: This is a preview of context.Context cancellation patterns!
 func GenerateCancellable(start, end int, done <-chan struct{}) <-chan int {
 	// YOUR CODE HERE
+
 	return nil
 }
 

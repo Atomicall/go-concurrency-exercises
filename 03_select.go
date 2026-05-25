@@ -35,7 +35,16 @@ import (
 // If both are ready simultaneously, either is acceptable.
 func FirstResponse(ch1, ch2 <-chan string) string {
 	// YOUR CODE HERE
-	return ""
+	select {
+	case v := <-ch1:
+		{
+			return v
+		}
+	case v := <-ch2:
+		{
+			return v
+		}
+	}
 }
 
 // MergeChannels combines two channels into one output channel.
@@ -44,17 +53,47 @@ func FirstResponse(ch1, ch2 <-chan string) string {
 // TODO: Implement this to:
 // 1. Create an output channel
 // 2. Launch a goroutine that:
-//    - Uses select in a loop to receive from either ch1 or ch2
-//    - Sends received values to output
-//    - Handles closure of both channels properly
-//    - Closes output when BOTH inputs are closed
+//   - Uses select in a loop to receive from either ch1 or ch2
+//   - Sends received values to output
+//   - Handles closure of both channels properly
+//   - Closes output when BOTH inputs are closed
+//
 // 3. Return the output channel
 //
 // HINT: You need to track which channels are still open. A nil channel
 // in select is never ready - use this to "disable" closed channels.
 func MergeChannels(ch1, ch2 <-chan int) <-chan int {
-	// YOUR CODE HERE
-	return nil
+
+	out := make(chan int)
+
+	go func() {
+		for {
+			select {
+			case val, ok := <-ch1:
+				{
+					if !ok {
+						ch1 = nil
+					} else {
+						out <- val
+					}
+				}
+			case val, ok := <-ch2:
+				{
+					if !ok {
+						ch2 = nil
+					} else {
+						out <- val
+					}
+				}
+			}
+			if ch1 == nil && ch2 == nil {
+				close(out)
+				return
+			}
+		}
+	}()
+
+	return out
 }
 
 // =============================================================================
@@ -66,8 +105,17 @@ func MergeChannels(ch1, ch2 <-chan int) <-chan int {
 //
 // TODO: Use select with time.After to implement timeout
 func ReceiveWithTimeout(ch <-chan int, timeout time.Duration) (int, bool) {
-	// YOUR CODE HERE
-	return 0, false
+	select {
+	case val := <-ch:
+		{
+			return val, true
+		}
+	case <-time.After(timeout):
+		{
+			return 0, false
+		}
+
+	}
 }
 
 // ReceiveWithDeadline receives until a specific time.
@@ -77,7 +125,27 @@ func ReceiveWithTimeout(ch <-chan int, timeout time.Duration) (int, bool) {
 // HINT: time.Until(deadline) gives remaining duration
 func ReceiveWithDeadline(ch <-chan int, deadline time.Time) []int {
 	// YOUR CODE HERE
-	return nil
+
+	var res []int
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	break_flg := false
+	for break_flg != true {
+		select {
+		case val, ok := <-ch:
+			{
+				if !ok {
+					break_flg = true
+				}
+				res = append(res, val)
+			}
+		case <-timer.C:
+			{
+				break_flg = true
+			}
+		}
+	}
+	return res
 }
 
 // PeriodicTask runs a function periodically until done is closed.
@@ -87,7 +155,22 @@ func ReceiveWithDeadline(ch <-chan int, deadline time.Time) []int {
 // Return the number of times fn was called
 func PeriodicTask(fn func(), interval time.Duration, done <-chan struct{}) int {
 	// YOUR CODE HERE
-	return 0
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	var counter int
+	for {
+		select {
+		case <-done:
+			{
+				return counter
+			}
+		case <-ticker.C:
+			fn()
+			counter++
+		}
+	}
 }
 
 // =============================================================================
@@ -100,7 +183,15 @@ func PeriodicTask(fn func(), interval time.Duration, done <-chan struct{}) int {
 // TODO: Use select with default to make non-blocking send
 func TrySend(ch chan<- int, value int) bool {
 	// YOUR CODE HERE
-	return false
+
+	select {
+	case ch <- value:
+		{
+			return true
+		}
+	default:
+		return false
+	}
 }
 
 // TryReceive attempts to receive without blocking.
@@ -108,17 +199,32 @@ func TrySend(ch chan<- int, value int) bool {
 //
 // TODO: Use select with default to make non-blocking receive
 func TryReceive(ch <-chan int) (int, bool) {
-	// YOUR CODE HERE
-	return 0, false
+	select {
+	case value := <-ch:
+		{
+			return value, true
+		}
+	default:
+		return 0, false
+	}
 }
 
 // DrainChannel empties a channel without blocking.
 // Returns all values that were buffered.
 //
 // TODO: Loop with TryReceive until channel is empty
-func DrainChannel(ch <-chan int) []int {
+func DrainChannel(ch <-chan int) (res []int) {
 	// YOUR CODE HERE
-	return nil
+
+	for {
+		val, ok := TryReceive(ch)
+		if !ok {
+			break
+		}
+		res = append(res, val)
+	}
+
+	return
 }
 
 // =============================================================================
@@ -141,8 +247,18 @@ func DrainChannel(ch <-chan int) []int {
 // HINT: You need nested selects - first try high priority with default,
 // then fall back to blocking select on both
 func PriorityReceive(highPriority, lowPriority <-chan int) (int, string) {
-	// YOUR CODE HERE
-	return 0, ""
+
+	select {
+	case v := <-highPriority:
+		return v, "high"
+	default:
+		select {
+		case v := <-highPriority:
+			return v, "high"
+		case v := <-lowPriority:
+			return v, "low"
+		}
+	}
 }
 
 // =============================================================================
@@ -155,14 +271,40 @@ func PriorityReceive(highPriority, lowPriority <-chan int) (int, string) {
 // TODO: This is tricky! You need to:
 // 1. Use an internal buffer (slice)
 // 2. select should try to:
-//    - Receive from input (if not closed) -> add to buffer
-//    - Send to output (if buffer not empty) -> remove from buffer
+//   - Receive from input (if not closed) -> add to buffer
+//   - Send to output (if buffer not empty) -> remove from buffer
+//
 // 3. Handle input closure and drain buffer before returning
 //
 // HINT: You can conditionally enable select cases using nil channels
 // If buffer is empty, set the "send" channel to nil to disable that case
 func Relay(input <-chan int, output chan<- int) {
 	// YOUR CODE HERE
+
+	var buffer []int
+	var nextVal int
+	var active_output chan<- int
+
+	for input != nil || len(buffer) != 0 {
+		if len(buffer) > 0 {
+			nextVal = buffer[0]
+			active_output = output
+		} else {
+			active_output = nil
+		}
+		select {
+		case val, ok := <-input:
+			if !ok {
+				input = nil
+			} else {
+				buffer = append(buffer, val)
+			}
+		case active_output <- nextVal:
+			{
+				buffer = buffer[1:]
+			}
+		}
+	}
 }
 
 // =============================================================================
@@ -178,6 +320,29 @@ func Relay(input <-chan int, output chan<- int) {
 // One approach: try each output in order using non-blocking sends.
 func Multiplex(input <-chan int, outputs []chan<- int, routeFn func(int) int) {
 	// YOUR CODE HERE
+
+	//for {
+	//	val, ok := <-input
+	//	if ok != true {
+	//		break
+	//	}
+	//	out_idx := routeFn(val)
+	//	outputs[out_idx] <- val
+	//}
+	//
+	//for _, o := range outputs {
+	//	close(o)
+	//}
+
+	for val := range input {
+		out_idx := routeFn(val)
+		outputs[out_idx] <- val
+	}
+
+	//for _, o := range outputs {
+	//	close(o)
+	//}
+
 }
 
 // =============================================================================
@@ -194,5 +359,31 @@ func Multiplex(input <-chan int, outputs []chan<- int, routeFn func(int) int) {
 // HINT: Track current index, try each channel in order
 func FairMerge(channels []<-chan int) <-chan int {
 	// YOUR CODE HERE
-	return nil
+	out := make(chan int)
+
+	go func() {
+		activeChans := make([]<-chan int, len(channels))
+		copy(activeChans, channels)
+
+		activeCount := len(activeChans)
+
+		for activeCount > 0 {
+			for i, ch := range activeChans {
+				if ch == nil {
+					continue
+				}
+				val, ok := <-ch
+
+				if !ok {
+					activeChans[i] = nil
+					activeCount--
+				} else {
+					out <- val
+				}
+			}
+		}
+		close(out)
+	}()
+
+	return out
 }

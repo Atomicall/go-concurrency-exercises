@@ -28,16 +28,34 @@ import (
 // TODO: Implement this function to:
 // 1. Create a WaitGroup
 // 2. For each element in nums, launch a goroutine that:
-//    - Calls fn(num)
-//    - Safely adds result to a shared sum (you'll need a mutex!)
-//    - Calls Done() when finished
+//   - Calls fn(num)
+//   - Safely adds result to a shared sum (you'll need a mutex!)
+//   - Calls Done() when finished
+//
 // 3. Wait for all goroutines to complete
 // 4. Return the sum
 //
 // QUESTION: What happens if you call wg.Add(1) inside the goroutine instead of before?
 func ConcurrentSum(nums []int, fn func(int) int) int {
 	// YOUR CODE HERE
-	return 0
+
+	var wg sync.WaitGroup
+	var sum_mx sync.Mutex
+	var sum int
+
+	for _, v := range nums {
+		wg.Add(1)
+		go func(fn func(int) int, arg int) {
+			defer wg.Done()
+			res := fn(arg)
+			sum_mx.Lock()
+			sum += res
+			sum_mx.Unlock()
+		}(fn, v)
+	}
+
+	wg.Wait()
+	return sum
 }
 
 // FetchAll simulates fetching data from multiple URLs concurrently.
@@ -52,7 +70,23 @@ func ConcurrentSum(nums []int, fn func(int) int) int {
 // HINT: Maps are not goroutine-safe, protect with mutex or use sync.Map
 func FetchAll(urls []string, fetcher func(string) string) map[string]string {
 	// YOUR CODE HERE
-	return nil
+	var resSync sync.Mutex
+	var result = make(map[string]string)
+	var wg sync.WaitGroup
+
+	for _, v := range urls {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			res := fetcher(url)
+			resSync.Lock()
+			result[url] = res
+			resSync.Unlock()
+		}(v)
+	}
+
+	wg.Wait()
+	return result
 }
 
 // =============================================================================
@@ -70,7 +104,46 @@ func FetchAll(urls []string, fetcher func(string) string) map[string]string {
 // QUESTION: Why process in batches instead of all at once?
 func ProcessBatches(items []int, batchSize int, process func(int) int) []int {
 	// YOUR CODE HERE
-	return nil
+
+	var result []int = make([]int, len(items))
+	var mt sync.Mutex
+
+	runs := len(items) / batchSize
+	var left = 0
+	if len(items)%batchSize > 0 {
+		left = len(items) % batchSize
+	}
+
+	itemProcessor := func(val int, idx int, group *sync.WaitGroup) {
+		defer group.Done()
+		r := process(val)
+		mt.Lock()
+		result[idx] = r
+		mt.Unlock()
+	}
+
+	for i := 0; i < runs; i++ {
+		batchItems := items[i*batchSize : i*batchSize+batchSize]
+
+		var wg sync.WaitGroup
+		for j, v := range batchItems {
+			wg.Add(1)
+			itemProcessor(v, i*batchSize+j, &wg)
+		}
+		wg.Wait()
+	}
+
+	if left > 0 {
+		latestBatch := items[len(items)-left:]
+		var wg sync.WaitGroup
+		for j, v := range latestBatch {
+			wg.Add(1)
+			itemProcessor(v, runs*batchSize+j, &wg)
+		}
+		wg.Wait()
+
+	}
+	return result
 }
 
 // WaitGroupReuse demonstrates proper WaitGroup reuse.
